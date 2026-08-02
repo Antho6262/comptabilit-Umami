@@ -544,8 +544,8 @@ select{
             <div id="dispPrimeMaxPatron" style="font-weight:700;">—</div>
           </div>
           <div>
-            <div class="foot-note" style="margin:0 0 4px;">Relevé du compte bancaire (solde actuel, à saisir)</div>
-            <input type="text" class="editable-input" id="setReleveBancaire" style="width:100%; text-align:left;">
+            <div class="foot-note" style="margin:0 0 4px;">Relevé du compte bancaire (issu de la page Compte bancaire)</div>
+            <div id="dispReleveBancaire" style="font-weight:700;">—</div>
           </div>
         </div>
       </div>
@@ -1085,6 +1085,7 @@ document.getElementById('clearBanqueBtn').addEventListener('click', ()=>{
 });
 document.getElementById('soldeTotal').addEventListener('change', ()=>{
   soldeManuel = document.getElementById('soldeTotal').value.trim() || "0$";
+  renderDot();
   saveAll();
 });
 
@@ -1331,7 +1332,7 @@ function applyRankSalaryScale(e, plafonds){
   if(directionTopGrades.includes(e.grade)){ e.salaire = Math.round(salMaxPatron * 1.0); return; }
 }
 
-let dotSettings = {releveBancaire: 0};
+let dotSettings = {};
 
 function computeBeneficeAndPlafonds(){
   const entrees = banque.filter(b=>b.montant>0);
@@ -1351,7 +1352,7 @@ function computeBeneficeAndPlafonds(){
 }
 
 function renderDot(){
-  document.getElementById('setReleveBancaire').value = dotSettings.releveBancaire || 0;
+  document.getElementById('dispReleveBancaire').textContent = fmt(toNumber(soldeManuel));
 
   // Passe 1 : calculs qui ne dépendent pas des plafonds (Makis/Chef d'équipe/Serveur)
   employees.forEach(e=>{
@@ -1374,7 +1375,7 @@ function renderDot(){
   const primeTotal = employees.reduce((s,e)=>s+(e.prime||0), 0);
 
   // Relevé du compte bancaire après salaire ET primes (N28), sert de base à l'impôt sur la richesse
-  const releveBancaire = dotSettings.releveBancaire || 0;
+  const releveBancaire = toNumber(soldeManuel);
   const soldeApresSalairePrimes = releveBancaire - salaireTotal - primeTotal;
   const richesseBracket = lookupBracket(richesseBrackets, soldeApresSalairePrimes);
   const tauxRichesse = richesseBracket ? richesseBracket.rate : 0; // M28
@@ -1534,13 +1535,6 @@ function renderDot(){
     copyText(lines.join("\n"), "Tableau des retraits copié");
   };
 }
-
-document.getElementById('setReleveBancaire').addEventListener('change', ()=>{
-  const n = parseFloat(document.getElementById('setReleveBancaire').value.replace(/[^0-9.-]/g,''));
-  if(!isNaN(n)) dotSettings.releveBancaire = n;
-  renderDot();
-  saveAll();
-});
 
 let lastDotSummary = {};
 
