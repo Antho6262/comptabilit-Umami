@@ -1345,6 +1345,17 @@ const SHEET_TAB_NAME = "Site Test";
 
 function syncToGoogleSheet(){
   if(!SHEET_WEBHOOK_URL) return;
+  const calc = computeBeneficeAndPlafonds();
+  const plafonds = calc.plafonds;
+
+  if(!dotSettings.ouverture) dotSettings.ouverture = new Date().toISOString();
+  dotSettings.fermeture = new Date().toISOString();
+  saveAll();
+  const fmtDateHeure = (iso)=>{
+    const d = new Date(iso);
+    return d.getDate()+"/"+(d.getMonth()+1)+"/"+String(d.getFullYear()).slice(-2)+" "+d.getHours()+"h"+String(d.getMinutes()).padStart(2,'0');
+  };
+
   const empRows = employees.map(e=>{
     const total = e.factures + e.runs + e.ventes;
     return [e.nom, e.grade, e.factures, e.runs, e.ventes, total, e.salaire||0, e.prime||0];
@@ -1361,10 +1372,16 @@ function syncToGoogleSheet(){
 
   const payload = {
     writes: [
-      {sheetName: SHEET_TAB_NAME, mode:"overwrite", startRow:8, startCol:1, rows: empRows.length?empRows:[["","","","","","","",""]]},
-      {sheetName: SHEET_TAB_NAME, mode:"overwrite", startRow:entreesStartRow, startCol:1, rows: entreeRows.length?entreeRows:[["","","","","",""]]},
-      {sheetName: SHEET_TAB_NAME, mode:"overwrite", startRow:8, startCol:10, rows: depensesRows},
-      {sheetName: SHEET_TAB_NAME, mode:"overwrite", startRow:8, startCol:13, rows: retraitsRows}
+      {sheetName: SHEET_TAB_NAME, mode:"overwrite", startRow:8, startCol:1, rows: empRows.length?empRows:[["","","","","","","",""]], numberFormatCol: 3},
+      {sheetName: SHEET_TAB_NAME, mode:"overwrite", startRow:entreesStartRow, startCol:1, rows: entreeRows.length?entreeRows:[["","","","","",""]], numberFormatCol: 3},
+      {sheetName: SHEET_TAB_NAME, mode:"overwrite", startRow:31, startCol:10, rows: depensesRows, numberFormatCol: 3},
+      {sheetName: SHEET_TAB_NAME, mode:"overwrite", startRow:31, startCol:13, rows: retraitsRows, numberFormatCol: 3},
+      {sheetName: SHEET_TAB_NAME, mode:"overwrite", startRow:1, startCol:2, rows: [[plafonds.salMax||0]], numberFormatCol: 1},
+      {sheetName: SHEET_TAB_NAME, mode:"overwrite", startRow:1, startCol:4, rows: [[plafonds.primeMax||0]], numberFormatCol: 1},
+      {sheetName: SHEET_TAB_NAME, mode:"overwrite", startRow:3, startCol:2, rows: [[plafonds.salMaxPatron||0]], numberFormatCol: 1},
+      {sheetName: SHEET_TAB_NAME, mode:"overwrite", startRow:3, startCol:4, rows: [[plafonds.primeMaxPatron||0]], numberFormatCol: 1},
+      {sheetName: SHEET_TAB_NAME, mode:"overwrite", startRow:1, startCol:7, rows: [[fmtDateHeure(dotSettings.ouverture)]]},
+      {sheetName: SHEET_TAB_NAME, mode:"overwrite", startRow:3, startCol:7, rows: [[fmtDateHeure(dotSettings.fermeture)]]}
     ]
   };
 
@@ -1678,6 +1695,7 @@ document.getElementById('archiveDotBtn').addEventListener('click', ()=>{
   employees = [];
   banque = [];
   soldeManuel = "0$";
+  dotSettings.ouverture = null;
   renderStats();
   renderBanque();
   renderDot();
