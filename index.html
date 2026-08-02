@@ -564,7 +564,7 @@ select{
           </thead>
           <tbody id="dotEmpBody"></tbody>
         </table>
-        <div class="foot-note" style="padding:0 18px 16px;">Makis = Run ÷ 5. De Rs Runner à Maître Sushi : Prime auto. Chef d'équipe : Salaire + Prime auto. Serveur : Salaire = % de la Facture (30/35/40/45%). Bonus événement (2000$/h) jamais inclus. Toutes les cases restent modifiables à la main (clic) — double-clic pour revenir au calcul automatique.</div>
+        <div class="foot-note" style="padding:0 18px 16px;">Makis = Run ÷ 5. De Rs Runner à Maître Sushi : Prime auto (barème Makis). Chef d'équipe : Salaire + Prime auto (barème Makis). Serveur : Salaire = % de la Facture (30/35/40/45%). Chef de Rang : Prime = 12,5% du Salaire Maximum employé. Rs Événementiel / Assistant Événementiel / RS Boutique : Prime = 25%. Directeur Général / Marketing : Prime = 50%. Bonus événement (2000$/h) jamais inclus. Toutes les cases restent modifiables à la main (clic) — double-clic pour revenir au calcul automatique.</div>
       </div>
 
       <div class="card" style="margin-bottom:24px;">
@@ -716,59 +716,60 @@ function chunkTokens(text, width){
 }
 
 let saveTimer = null;
+const LS_PREFIX = 'umami_compta_';
 function markSaving(){
   const el = document.getElementById('saveHint');
   if(el) el.textContent = "Enregistrement...";
 }
 function markSaved(){
   const el = document.getElementById('saveHint');
-  if(el) el.textContent = "Sauvegardé automatiquement — visible par toute l'équipe.";
+  if(el) el.textContent = "Sauvegardé dans ce navigateur.";
 }
 function markError(){
   const el = document.getElementById('saveHint');
-  if(el) el.textContent = "Échec de la sauvegarde, réessaie.";
+  if(el) el.textContent = "Échec de la sauvegarde (stockage du navigateur indisponible).";
 }
 function saveAll(){
   markSaving();
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(async ()=>{
+  saveTimer = setTimeout(()=>{
     try{
-      await window.storage.set('employees', JSON.stringify(employees), true);
-      await window.storage.set('roster', JSON.stringify(roster), true);
-      await window.storage.set('banque', JSON.stringify(banque), true);
-      await window.storage.set('soldeManuel', soldeManuel, true);
-      await window.storage.set('archives', JSON.stringify(archives), true);
-      await window.storage.set('dotSettings', JSON.stringify(dotSettings), true);
+      localStorage.setItem(LS_PREFIX+'employees', JSON.stringify(employees));
+      localStorage.setItem(LS_PREFIX+'roster', JSON.stringify(roster));
+      localStorage.setItem(LS_PREFIX+'banque', JSON.stringify(banque));
+      localStorage.setItem(LS_PREFIX+'soldeManuel', soldeManuel);
+      localStorage.setItem(LS_PREFIX+'archives', JSON.stringify(archives));
+      localStorage.setItem(LS_PREFIX+'dotSettings', JSON.stringify(dotSettings));
       markSaved();
     }catch(e){
       markError();
     }
-  }, 500);
+  }, 300);
 }
 async function loadAll(){
   try{
-    const e = await window.storage.get('employees', true);
-    if(e && e.value) employees = JSON.parse(e.value);
+    const e = localStorage.getItem(LS_PREFIX+'employees');
+    if(e) employees = JSON.parse(e);
   }catch(err){}
   try{
-    const r = await window.storage.get('roster', true);
-    if(r && r.value) roster = JSON.parse(r.value);
+    const r = localStorage.getItem(LS_PREFIX+'roster');
+    if(r) roster = JSON.parse(r);
   }catch(err){}
   try{
-    const b = await window.storage.get('banque', true);
-    if(b && b.value) banque = JSON.parse(b.value);
+    const b = localStorage.getItem(LS_PREFIX+'banque');
+    if(b) banque = JSON.parse(b);
   }catch(err){}
   try{
-    const s = await window.storage.get('soldeManuel', true);
-    if(s && s.value) soldeManuel = s.value;
+    const s = localStorage.getItem(LS_PREFIX+'soldeManuel');
+    if(s) soldeManuel = s;
   }catch(err){}
   try{
-    const a = await window.storage.get('archives', true);
-    if(a && a.value) archives = JSON.parse(a.value);
+    const a = localStorage.getItem(LS_PREFIX+'archives');
+    if(a) archives = JSON.parse(a);
   }catch(err){}
   try{
-    const d = await window.storage.get('dotSettings', true);
-    if(d && d.value) dotSettings = JSON.parse(d.value);
+    const d = localStorage.getItem(LS_PREFIX+'dotSettings');
+    if(d) dotSettings = JSON.parse(d);
   }catch(err){}
 }
 function genId(){
@@ -1292,21 +1293,76 @@ function applyPayScale(e){
   }
 }
 
+// Barème des primes (% du Salaire Maximum employé de la semaine, selon le grade)
+const rsTierGrades = ["Rs Événementiel","Assistant Événementiel","RS Boutique"];
+const directeurTierGrades = ["Directeur Général","Directeur Marketing"];
+function applyRankPrimeScale(e, plafonds){
+  if(e.primeManuel) return; // respecte une modification manuelle
+  const salMax = (plafonds && plafonds.salMax) || 0;
+  if(e.grade === "Chef de Rang"){ e.prime = Math.round(salMax * 0.125); return; }
+  if(rsTierGrades.includes(e.grade)){ e.prime = Math.round(salMax * 0.25); return; }
+  if(directeurTierGrades.includes(e.grade)){ e.prime = Math.round(salMax * 0.50); return; }
+}
+
 let dotSettings = {releveBancaire: 0};
 
 function renderDot(){
   document.getElementById('setReleveBancaire').value = dotSettings.releveBancaire || 0;
 
-  // Employés
+  // Passe 1 : calculs qui ne dépendent pas des plafonds (Makis/Chef d'équipe/Serveur)
+  employees.forEach(e=>{
+    if(e.salaire===undefined) e.salaire = 0;
+    if(e.prime===undefined) e.prime = 0;
+    applyPayScale(e);
+  });
+
+  const entrees = banque.filter(b=>b.montant>0);
+  const retraits = banque.filter(b=>b.montant<0 && /wwi|vcmc/i.test(b.motif));
+  const depensesAutres = banque.filter(b=>b.montant<0 && !/wwi|vcmc/i.test(b.motif) && !/^salaire\s*\/?\s*prime/i.test(b.motif.trim()) && !/^imp[oô]t/i.test(b.motif.trim()));
+  const salaireTotal = employees.reduce((s,e)=>s+(e.salaire||0), 0);
+  const depensesAutresTotal = depensesAutres.reduce((s,b)=>s+Math.abs(b.montant), 0);
+  const retraitsTotal = retraits.reduce((s,b)=>s+Math.abs(b.montant), 0);
+
+  // Résumé comptable — formules exactes récupérées du fichier source (onglet S.30)
+  const caBrutEmployees = employees.reduce((s,e)=>s+e.factures+e.runs+e.ventes, 0);
+  const caBrutEntrees = entrees.reduce((s,b)=>s+b.montant, 0);
+  const caBrut = caBrutEmployees + caBrutEntrees; // J26 = SUM(F8:F1001)
+
+  const depensesDeductiblesBrut = salaireTotal + depensesAutresTotal; // SUM(L34:L88)
+  const depensesDeductibles = Math.min(depensesDeductiblesBrut, 2000000); // K26 plafonné à 2 000 000$
+
+  const benefice = caBrut - depensesDeductibles; // L26
+  const bracket = lookupBracket(beneficeBrackets, Math.max(benefice,0));
+  const taux = bracket ? bracket.rate : 0; // M26
+
+  // Plafonds de salaire/prime = ceux du palier de bénéfice actuel (VLOOKUP sur le taux)
+  const plafonds = bracket || {salMax:0, salMaxPatron:0, primeMax:0, primeMaxPatron:0};
+
+  // Passe 2 : primes Chef de Rang / RS / Directeur, qui dépendent du plafond ci-dessus
+  employees.forEach(e=> applyRankPrimeScale(e, plafonds));
+  const primeTotal = employees.reduce((s,e)=>s+(e.prime||0), 0);
+
+  // Relevé du compte bancaire après salaire ET primes (N28), sert de base à l'impôt sur la richesse
+  const releveBancaire = dotSettings.releveBancaire || 0;
+  const soldeApresSalairePrimes = releveBancaire - salaireTotal - primeTotal;
+  const richesseBracket = lookupBracket(richesseBrackets, soldeApresSalairePrimes);
+  const tauxRichesse = richesseBracket ? richesseBracket.rate : 0; // M28
+
+  const montantImpots = Math.round(benefice*(taux+tauxRichesse)); // N26 = L26*(M26+M28)
+  const beneficeApresImpot = benefice - montantImpots; // J28
+  const beneficeApresPrimes = beneficeApresImpot - primeTotal; // L28
+  const releveApresSalaire = soldeApresSalairePrimes; // O28, identique à N28
+  const nombreEmployes = employees.length + entrees.length; // P17 = COUNTA(A8:A1001), compte aussi les lignes d'entrées
+
+  lastDotSummary = {caBrut, depensesDeductibles, benefice, taux, tauxRichesse, montantImpots, beneficeApresImpot, primeTotal, beneficeApresPrimes, releveBancaire, releveApresSalaire, nombreEmployes};
+
+  // Employés (rendu HTML, maintenant que salaire/prime finaux sont connus)
   const empBody = document.getElementById('dotEmpBody');
   empBody.innerHTML = '';
   if(employees.length===0){
     empBody.innerHTML = '<tr><td colspan="8" class="empty">Aucun employé. Colle tes statistiques dans l\'onglet Statistiques.</td></tr>';
   } else {
     employees.forEach(e=>{
-      if(e.salaire===undefined) e.salaire = 0;
-      if(e.prime===undefined) e.prime = 0;
-      applyPayScale(e);
       const total = e.factures + e.runs + e.ventes;
       const tr = document.createElement('tr');
       const salCell = `<td class="num editable" data-id="${e.id}" data-field="salaire">${fmt(e.salaire)}</td>`;
@@ -1358,7 +1414,6 @@ function renderDot(){
   });
 
   // Entrées d'argent (CA / virements positifs)
-  const entrees = banque.filter(b=>b.montant>0);
   const entreesBody = document.getElementById('dotEntreesBody');
   entreesBody.innerHTML = entrees.length===0
     ? '<tr><td colspan="3" class="empty">Aucune entrée pour l\'instant.</td></tr>'
@@ -1385,14 +1440,7 @@ function renderDot(){
     });
   });
 
-  // Retraits (WWI / VCMC) vs Dépense déductible (le reste)
-  const retraits = banque.filter(b=>b.montant<0 && /wwi|vcmc/i.test(b.motif));
-  const depensesAutres = banque.filter(b=>b.montant<0 && !/wwi|vcmc/i.test(b.motif) && !/^salaire\s*\/?\s*prime/i.test(b.motif.trim()) && !/^imp[oô]t/i.test(b.motif.trim()));
-  const salaireTotal = employees.reduce((s,e)=>s+(e.salaire||0), 0);
-  const primeTotal = employees.reduce((s,e)=>s+(e.prime||0), 0);
-  const depensesAutresTotal = depensesAutres.reduce((s,b)=>s+Math.abs(b.montant), 0);
-  const retraitsTotal = retraits.reduce((s,b)=>s+Math.abs(b.montant), 0);
-
+  // Dépense déductible / Tableau des retraits
   const depensesBody = document.getElementById('dotDepensesBody');
   let depensesHtml = `<tr><td>**************</td><td><strong>Salaire</strong></td><td class="num"><strong>${fmt(salaireTotal)}</strong></td></tr>`;
   depensesHtml += depensesAutres.map(b=>`<tr><td>${b.date}</td><td>${b.motif}</td><td class="num">${fmt(Math.abs(b.montant))}</td></tr>`).join('');
@@ -1404,35 +1452,6 @@ function renderDot(){
     ? '<tr><td colspan="3" class="empty">Aucun retrait WWI / VCMC.</td></tr>'
     : retraits.map(b=>`<tr><td>${b.date}</td><td>${b.motif}</td><td class="num">${fmt(Math.abs(b.montant))}</td></tr>`).join('');
   retraitsBody.innerHTML = retraitsHtml;
-
-  // Résumé comptable — formules exactes récupérées du fichier source (onglet S.30)
-  const caBrutEmployees = employees.reduce((s,e)=>s+e.factures+e.runs+e.ventes, 0);
-  const caBrutEntrees = entrees.reduce((s,b)=>s+b.montant, 0);
-  const caBrut = caBrutEmployees + caBrutEntrees; // J26 = SUM(F8:F1001)
-
-  const depensesDeductiblesBrut = salaireTotal + depensesAutresTotal; // SUM(L34:L88)
-  const depensesDeductibles = Math.min(depensesDeductiblesBrut, 2000000); // K26 plafonné à 2 000 000$
-
-  const benefice = caBrut - depensesDeductibles; // L26
-  const bracket = lookupBracket(beneficeBrackets, Math.max(benefice,0));
-  const taux = bracket ? bracket.rate : 0; // M26
-
-  // Plafonds de salaire/prime = ceux du palier de bénéfice actuel (VLOOKUP sur le taux)
-  const plafonds = bracket || {salMax:0, salMaxPatron:0, primeMax:0, primeMaxPatron:0};
-
-  // Relevé du compte bancaire après salaire ET primes (N28), sert de base à l'impôt sur la richesse
-  const releveBancaire = dotSettings.releveBancaire || 0;
-  const soldeApresSalairePrimes = releveBancaire - salaireTotal - primeTotal;
-  const richesseBracket = lookupBracket(richesseBrackets, soldeApresSalairePrimes);
-  const tauxRichesse = richesseBracket ? richesseBracket.rate : 0; // M28
-
-  const montantImpots = Math.round(benefice*(taux+tauxRichesse)); // N26 = L26*(M26+M28)
-  const beneficeApresImpot = benefice - montantImpots; // J28
-  const beneficeApresPrimes = beneficeApresImpot - primeTotal; // L28
-  const releveApresSalaire = soldeApresSalairePrimes; // O28, identique à N28
-  const nombreEmployes = employees.length + entrees.length; // P17 = COUNTA(A8:A1001), compte aussi les lignes d'entrées
-
-  lastDotSummary = {caBrut, depensesDeductibles, benefice, taux, tauxRichesse, montantImpots, beneficeApresImpot, primeTotal, beneficeApresPrimes, releveBancaire, releveApresSalaire, nombreEmployes};
 
   document.getElementById('dispSalMaxEmp').textContent = fmt(plafonds.salMax||0);
   document.getElementById('dispSalMaxPatron').textContent = fmt(plafonds.salMaxPatron||0);
