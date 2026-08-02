@@ -389,7 +389,10 @@ select{
           <h1>Activité par employé</h1>
           <p>Colle les statistiques copiées depuis le jeu dans la zone ci-dessous, ou modifie les chiffres directement dans le tableau.</p>
         </div>
-        <button class="btn" id="copyAllBtn">Copier tout le tableau</button>
+        <div style="display:flex; gap:10px;">
+          <button class="btn" id="copyAllBtn">Copier tout le tableau</button>
+          <button class="btn-ghost btn" id="clearStatsBtn" style="border:1px solid var(--border);">Vider la liste</button>
+        </div>
       </div>
       <textarea class="paste-zone" id="pasteStats" placeholder="Colle ici (Ctrl+V) les statistiques copiées depuis le jeu : une ligne par employé, colonnes Nom / Rang / Factures / Runs / Ventes / Part employé / Heures."></textarea>
       <div class="toolbar">
@@ -467,7 +470,10 @@ select{
           <h1>Compte bancaire</h1>
           <p>Colle l'historique du compte copié depuis le jeu. Clique sur un motif pour le modifier (par ex. ajouter le nom de l'entreprise concernée).</p>
         </div>
-        <input type="text" class="balance-pill" id="soldeTotal" style="border:1px solid var(--border); font-size:14px; width:160px; text-align:right;" value="0$">
+        <div style="display:flex; gap:10px; align-items:center;">
+          <input type="text" class="balance-pill" id="soldeTotal" style="border:1px solid var(--border); font-size:14px; width:160px; text-align:right;" value="0$">
+          <button class="btn-ghost btn" id="clearBanqueBtn" style="border:1px solid var(--border);">Vider la liste</button>
+        </div>
       </div>
       <textarea class="paste-zone" id="pasteBanque" placeholder="Colle ici (Ctrl+V) l'historique du compte copié depuis le jeu : une ligne par mouvement, colonnes Date / Motif / Montant."></textarea>
       <div class="toolbar">
@@ -924,6 +930,15 @@ document.getElementById('copyAllBtn').addEventListener('click', ()=>{
   });
   copyText(lines.join("\n"), "Tableau complet copié");
 });
+document.getElementById('clearStatsBtn').addEventListener('click', ()=>{
+  if(confirm("Vider toute la liste des Statistiques ? Cette action est irréversible.")){
+    employees = [];
+    renderStats();
+    renderDot();
+    saveAll();
+    showToast("Liste vidée");
+  }
+});
 
 // EMPLOYES PAGE
 function renderEmployes(){
@@ -1059,6 +1074,15 @@ function renderBanque(){
   if(typeof renderDot==='function') renderDot();
 }
 document.getElementById('banqueSearch').addEventListener('input', renderBanque);
+document.getElementById('clearBanqueBtn').addEventListener('click', ()=>{
+  if(confirm("Vider tout le Compte bancaire ? Cette action est irréversible.")){
+    banque = [];
+    renderBanque();
+    renderDot();
+    saveAll();
+    showToast("Liste vidée");
+  }
+});
 document.getElementById('soldeTotal').addEventListener('change', ()=>{
   soldeManuel = document.getElementById('soldeTotal').value.trim() || "0$";
   saveAll();
