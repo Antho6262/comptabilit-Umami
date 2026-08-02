@@ -564,7 +564,7 @@ select{
           </thead>
           <tbody id="dotEmpBody"></tbody>
         </table>
-        <div class="foot-note" style="padding:0 18px 16px;">Makis = Run ÷ 5. De Rs Runner à Maître Sushi : Prime auto (barème Makis). Chef d'équipe : Salaire + Prime auto (barème Makis). Serveur : Salaire = % de la Facture (30/35/40/45%). Chef de Rang : Prime = 12,5% du Salaire Maximum employé. Rs Événementiel / Assistant Événementiel / RS Boutique : Prime = 25%. Directeur Général / Marketing : Prime = 50%. Bonus événement (2000$/h) jamais inclus. Toutes les cases restent modifiables à la main (clic) — double-clic pour revenir au calcul automatique.</div>
+        <div class="foot-note" style="padding:0 18px 16px;">Makis = Run ÷ 5. De Rs Runner à Maître Sushi : Prime auto (barème Makis). Chef d'équipe : Salaire + Prime auto (barème Makis). Serveur : Salaire = % de la Facture (30/35/40/45%). Chef de Rang : Salaire = 12,5% du Salaire Maximum employé. Rs Événementiel / Assistant Événementiel / RS Boutique : Salaire = 25%. Directeur Général / Marketing : Salaire = 50%. Patron / Co-Patron : Salaire = 100% du Salaire Maximum patron. Bonus événement (2000$/h) jamais inclus. Toutes les cases restent modifiables à la main (clic) — double-clic pour revenir au calcul automatique.</div>
       </div>
 
       <div class="card" style="margin-bottom:24px;">
@@ -1293,18 +1293,38 @@ function applyPayScale(e){
   }
 }
 
-// Barème des primes (% du Salaire Maximum employé de la semaine, selon le grade)
+// Barème des primes (% du Salaire Maximum de la semaine, selon le grade) -> rempli en Salaire
 const rsTierGrades = ["Rs Événementiel","Assistant Événementiel","RS Boutique"];
 const directeurTierGrades = ["Directeur Général","Directeur Marketing"];
-function applyRankPrimeScale(e, plafonds){
-  if(e.primeManuel) return; // respecte une modification manuelle
+const directionTopGrades = ["Patron","Co-Patron"];
+function applyRankSalaryScale(e, plafonds){
+  if(e.salaireManuel) return; // respecte une modification manuelle
   const salMax = (plafonds && plafonds.salMax) || 0;
-  if(e.grade === "Chef de Rang"){ e.prime = Math.round(salMax * 0.125); return; }
-  if(rsTierGrades.includes(e.grade)){ e.prime = Math.round(salMax * 0.25); return; }
-  if(directeurTierGrades.includes(e.grade)){ e.prime = Math.round(salMax * 0.50); return; }
+  const salMaxPatron = (plafonds && plafonds.salMaxPatron) || 0;
+  if(e.grade === "Chef de Rang"){ e.salaire = Math.round(salMax * 0.125); return; }
+  if(rsTierGrades.includes(e.grade)){ e.salaire = Math.round(salMax * 0.25); return; }
+  if(directeurTierGrades.includes(e.grade)){ e.salaire = Math.round(salMax * 0.50); return; }
+  if(directionTopGrades.includes(e.grade)){ e.salaire = Math.round(salMaxPatron * 1.0); return; }
 }
 
 let dotSettings = {releveBancaire: 0};
+
+function computeBeneficeAndPlafonds(){
+  const entrees = banque.filter(b=>b.montant>0);
+  const depensesAutres = banque.filter(b=>b.montant<0 && !/wwi|vcmc/i.test(b.motif) && !/^salaire\s*\/?\s*prime/i.test(b.motif.trim()) && !/^imp[oô]t/i.test(b.motif.trim()));
+  const salaireTotal = employees.reduce((s,e)=>s+(e.salaire||0), 0);
+  const depensesAutresTotal = depensesAutres.reduce((s,b)=>s+Math.abs(b.montant), 0);
+  const caBrutEmployees = employees.reduce((s,e)=>s+e.factures+e.runs+e.ventes, 0);
+  const caBrutEntrees = entrees.reduce((s,b)=>s+b.montant, 0);
+  const caBrut = caBrutEmployees + caBrutEntrees; // J26 = SUM(F8:F1001)
+  const depensesDeductiblesBrut = salaireTotal + depensesAutresTotal; // SUM(L34:L88)
+  const depensesDeductibles = Math.min(depensesDeductiblesBrut, 2000000); // K26 plafonné à 2 000 000$
+  const benefice = caBrut - depensesDeductibles; // L26
+  const bracket = lookupBracket(beneficeBrackets, Math.max(benefice,0));
+  const taux = bracket ? bracket.rate : 0; // M26
+  const plafonds = bracket || {salMax:0, salMaxPatron:0, primeMax:0, primeMaxPatron:0};
+  return {entrees, depensesAutres, salaireTotal, depensesAutresTotal, caBrut, depensesDeductibles, benefice, bracket, taux, plafonds};
+}
 
 function renderDot(){
   document.getElementById('setReleveBancaire').value = dotSettings.releveBancaire || 0;
@@ -1316,30 +1336,17 @@ function renderDot(){
     applyPayScale(e);
   });
 
-  const entrees = banque.filter(b=>b.montant>0);
+  // Le salaire des grades RS/Directeur/Chef de Rang/Patron/Co-Patron dépend du plafond,
+  // qui dépend du bénéfice, qui dépend de la somme des salaires : on itère 2 fois pour converger.
+  let calc = computeBeneficeAndPlafonds();
+  employees.forEach(e=> applyRankSalaryScale(e, calc.plafonds));
+  calc = computeBeneficeAndPlafonds();
+  employees.forEach(e=> applyRankSalaryScale(e, calc.plafonds));
+  calc = computeBeneficeAndPlafonds();
+
+  const {entrees, depensesAutres, salaireTotal, caBrut, depensesDeductibles, benefice, taux, plafonds} = calc;
   const retraits = banque.filter(b=>b.montant<0 && /wwi|vcmc/i.test(b.motif));
-  const depensesAutres = banque.filter(b=>b.montant<0 && !/wwi|vcmc/i.test(b.motif) && !/^salaire\s*\/?\s*prime/i.test(b.motif.trim()) && !/^imp[oô]t/i.test(b.motif.trim()));
-  const salaireTotal = employees.reduce((s,e)=>s+(e.salaire||0), 0);
-  const depensesAutresTotal = depensesAutres.reduce((s,b)=>s+Math.abs(b.montant), 0);
   const retraitsTotal = retraits.reduce((s,b)=>s+Math.abs(b.montant), 0);
-
-  // Résumé comptable — formules exactes récupérées du fichier source (onglet S.30)
-  const caBrutEmployees = employees.reduce((s,e)=>s+e.factures+e.runs+e.ventes, 0);
-  const caBrutEntrees = entrees.reduce((s,b)=>s+b.montant, 0);
-  const caBrut = caBrutEmployees + caBrutEntrees; // J26 = SUM(F8:F1001)
-
-  const depensesDeductiblesBrut = salaireTotal + depensesAutresTotal; // SUM(L34:L88)
-  const depensesDeductibles = Math.min(depensesDeductiblesBrut, 2000000); // K26 plafonné à 2 000 000$
-
-  const benefice = caBrut - depensesDeductibles; // L26
-  const bracket = lookupBracket(beneficeBrackets, Math.max(benefice,0));
-  const taux = bracket ? bracket.rate : 0; // M26
-
-  // Plafonds de salaire/prime = ceux du palier de bénéfice actuel (VLOOKUP sur le taux)
-  const plafonds = bracket || {salMax:0, salMaxPatron:0, primeMax:0, primeMaxPatron:0};
-
-  // Passe 2 : primes Chef de Rang / RS / Directeur, qui dépendent du plafond ci-dessus
-  employees.forEach(e=> applyRankPrimeScale(e, plafonds));
   const primeTotal = employees.reduce((s,e)=>s+(e.prime||0), 0);
 
   // Relevé du compte bancaire après salaire ET primes (N28), sert de base à l'impôt sur la richesse
