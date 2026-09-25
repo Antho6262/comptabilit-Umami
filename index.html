@@ -1197,7 +1197,16 @@ document.getElementById('pasteEmp').addEventListener('paste', ()=>{
         emp.derniere = derniere;
         updated++;
       }
+      // Chaque employé de Gestion des employés doit exister dans Statistiques,
+      // même à 0$ partout s'il n'a pas encore pris son service.
+      let statEmp = employees.find(e => e.nom.trim().toLowerCase() === cleanNom.trim().toLowerCase());
+      if(!statEmp){
+        employees.push({id: genId(), nom: cleanNom, grade: cleanGrade, factures:0, runs:0, ventes:0, part:0, heures:'0h00', salaire:0, prime:0});
+      } else {
+        statEmp.grade = cleanGrade;
+      }
     });
+    renderStats();
     renderEmployes();
     showToast(added+" employé(s) ajouté(s), "+updated+" mis à jour");
     saveAll();
