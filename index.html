@@ -347,9 +347,34 @@ select{
   color:var(--muted);
   margin:-10px 0 8px 0;
 }
+.login-overlay{position:fixed; inset:0; z-index:200; display:flex; align-items:center; justify-content:center; background:rgba(11,12,16,0.98);}
+.login-card{width:360px; max-width:92vw; background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:28px; text-align:center;}
+.login-card img{width:84px; height:84px; border-radius:50%; margin-bottom:10px; object-fit:cover;}
+.login-card h2{margin:6px 0 4px; font-size:20px;}
+.login-card p{color:var(--muted); font-size:12.5px; margin:0 0 16px; line-height:1.5;}
+.login-card input{width:100%; margin-bottom:10px;}
+.login-card .btn{width:100%; margin-top:4px;}
+.login-error{color:#ff7a7a; font-size:12.5px; min-height:18px; margin-top:10px; line-height:1.4;}
+input[type="password"]{background:var(--panel-2); border:1px solid var(--border); color:var(--text); padding:10px 14px; border-radius:8px; font-size:13px; outline:none;}
+input[type="password"]:focus{border-color:var(--accent);}
 </style>
 </head>
 <body>
+<div class="login-overlay" id="loginOverlay">
+  <div class="login-card">
+    <img id="loginLogo" alt="Umami">
+    <div id="loginLoading" style="color:var(--muted); font-size:13px; padding:18px 0;">Connexion au serveur…</div>
+    <div id="loginForm" style="display:none;">
+      <h2 id="loginTitle">Connexion</h2>
+      <p id="loginSub">Identifie-toi pour accéder à la comptabilité Umami.</p>
+      <input type="text" id="loginUser" placeholder="Identifiant" autocomplete="username">
+      <input type="password" id="loginPass" placeholder="Mot de passe" autocomplete="current-password">
+      <input type="password" id="loginPass2" placeholder="Confirmer le mot de passe" autocomplete="new-password" style="display:none;">
+      <button class="btn" id="loginBtn">Se connecter</button>
+    </div>
+    <div class="login-error" id="loginError"></div>
+  </div>
+</div>
 <div class="app">
   <div class="sidebar">
     <div class="brand">
@@ -377,6 +402,16 @@ select{
     </div>
     <div class="nav-item" data-page="archives">
       <span class="ic">🗄️</span> Archives
+    </div>
+    <div class="nav-item admin-only" data-page="comptes" style="display:none;">
+      <span class="ic">👤</span> Comptes
+    </div>
+    <div class="nav-item admin-only" data-page="journal" style="display:none;">
+      <span class="ic">📜</span> Journal
+    </div>
+    <div id="userBox" style="margin-top:22px; padding-top:14px; border-top:1px solid var(--border); font-size:12px; color:var(--muted);">
+      <div>Connecté : <strong id="userBoxName" style="color:var(--text);">—</strong></div>
+      <button class="btn-ghost btn btn-sm" id="logoutBtn" style="margin-top:8px; border:1px solid var(--border);">Déconnexion</button>
     </div>
   </div>
 
@@ -645,6 +680,50 @@ select{
       <div id="archivesList"></div>
     </section>
 
+    <!-- COMPTES (admin) -->
+    <section class="page" id="page-comptes">
+      <div class="page-head">
+        <div>
+          <h1>Comptes</h1>
+          <p>Ajoute les personnes qui peuvent utiliser le site. Elles voient et modifient les mêmes données que toi ; seul toi vois le journal et gères les comptes.</p>
+        </div>
+      </div>
+      <div class="card" style="margin-bottom:24px;">
+        <div class="add-row-form" style="border-top:none;">
+          <input type="text" id="newUserName" placeholder="Identifiant (ex: jean)">
+          <input type="text" id="newUserPass" placeholder="Mot de passe (6 caractères min.)">
+          <button class="btn" id="addUserBtn">Ajouter le compte</button>
+        </div>
+      </div>
+      <div class="card">
+        <table>
+          <thead><tr><th>Identifiant</th><th>Rôle</th><th>Créé le</th><th>Créé par</th><th></th></tr></thead>
+          <tbody id="usersBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- JOURNAL (admin) -->
+    <section class="page" id="page-journal">
+      <div class="page-head">
+        <div>
+          <h1>Journal d'activité</h1>
+          <p>Qui a fait quoi, et quand : collages, modifications, archivages, connexions…</p>
+        </div>
+        <button class="btn" id="journalRefreshBtn">Actualiser</button>
+      </div>
+      <div class="toolbar">
+        <select id="journalUser"><option value="">Tous les utilisateurs</option></select>
+        <input type="text" class="search-box" id="journalSearch" placeholder="Rechercher dans le journal...">
+      </div>
+      <div class="card">
+        <table>
+          <thead><tr><th>Date et heure</th><th>Utilisateur</th><th>Action</th><th>Détail</th></tr></thead>
+          <tbody id="journalBody"></tbody>
+        </table>
+      </div>
+    </section>
+
   </main>
 </div>
 <div class="toast" id="toast">Copié dans le presse-papiers</div>
@@ -725,62 +804,232 @@ function chunkTokens(text, width){
 }
 
 let saveTimer = null;
-const LS_PREFIX = 'umami_compta_';
+let saveSeq = 0;
+let pendingSave = false;
+let savingNow = false;
+let session = null;
+let localVersion = 0;
+let lastSavedSnapshot = null;
+let pollTimer = null;
+const SESSION_KEY = 'umami_session';
+const LS_PREFIX = 'umami_compta_'; // anciennes données locales (importées une seule fois)
+
+function lsGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
+function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
+function lsDel(k){ try{ localStorage.removeItem(k); }catch(e){} }
+
 function markSaving(){
   const el = document.getElementById('saveHint');
   if(el) el.textContent = "Enregistrement...";
 }
 function markSaved(){
   const el = document.getElementById('saveHint');
-  if(el) el.textContent = "Sauvegardé dans ce navigateur.";
+  if(el) el.textContent = "Sauvegardé sur le serveur.";
 }
-function markError(){
+function markError(msg){
   const el = document.getElementById('saveHint');
-  if(el) el.textContent = "Échec de la sauvegarde (stockage du navigateur indisponible).";
+  if(el) el.textContent = "Échec de la sauvegarde : " + (msg || "serveur injoignable");
 }
+
+// Appel au backend Apps Script (réponse lisible : Content-Type text/plain = pas de préflight CORS)
+async function api(action, payload){
+  const body = Object.assign({action, token: session ? session.token : undefined}, payload || {});
+  let res;
+  try{
+    res = await fetch(SHEET_WEBHOOK_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body: JSON.stringify(body)});
+  }catch(e){ return {ok:false, error:'network'}; }
+  let json;
+  try{ json = await res.json(); }catch(e){ return {ok:false, error:'badresponse'}; }
+  if(json && json.error === 'auth' && session && !['me','login','setup','status'].includes(action)) handleAuthLost();
+  return json;
+}
+function logNow(type, detail){ if(session) api('log', {entries:[{type, detail}]}); }
+
+function collectState(){ return {employees, roster, banque, soldeManuel, archives, dotSettings}; }
+function cloneState(s){ return JSON.parse(JSON.stringify(s)); }
+
+// Les données sont partagées entre comptes : on neutralise < > " pour qu'aucune donnée collée
+// (nom, motif...) ne puisse injecter du HTML chez un autre utilisateur.
+function sanitizeDeep(v){
+  if(typeof v === 'string') return v.replace(/</g,'\u2039').replace(/>/g,'\u203A').replace(/"/g,'\u201D');
+  if(Array.isArray(v)) return v.map(sanitizeDeep);
+  if(v && typeof v === 'object'){
+    const o = {};
+    Object.keys(v).forEach(k=>{ if(k!=='__proto__' && k!=='constructor' && k!=='prototype') o[k] = sanitizeDeep(v[k]); });
+    return o;
+  }
+  return v;
+}
+function renderAll(){
+  renderStats(); renderEmployes(); renderBanque(); renderBaremes(); renderDot(); renderArchives();
+}
+function applyState(s){
+  s = sanitizeDeep(s || {});
+  employees = Array.isArray(s.employees) ? s.employees : [];
+  roster = Array.isArray(s.roster) ? s.roster : [];
+  banque = Array.isArray(s.banque) ? s.banque : [];
+  soldeManuel = (typeof s.soldeManuel === 'string' && s.soldeManuel) ? s.soldeManuel : "0$";
+  archives = Array.isArray(s.archives) ? s.archives : [];
+  dotSettings = (s.dotSettings && typeof s.dotSettings === 'object' && !Array.isArray(s.dotSettings)) ? s.dotSettings : {};
+  roster.forEach(e=>{ e.grade = ensureGrade(String(e.grade == null ? '' : e.grade)); });
+  employees.forEach(e=>{ e.grade = ensureGrade(String(e.grade == null ? '' : e.grade)); });
+  renderAll();
+}
+
+// ----- Journal : on décrit les changements en comparant l'état avant/après chaque sauvegarde -----
+function fv(v){ return (typeof v === 'number') ? v.toLocaleString('fr-FR') : String(v); }
+function lst(arr, max){
+  max = max || 6;
+  if(arr.length <= max) return arr.join('; ');
+  return arr.slice(0, max).join('; ') + ' … +' + (arr.length - max) + ' autre(s)';
+}
+function diffState(prev, next){
+  const out = [];
+  if(!prev) return out;
+  const push = (type, detail)=> out.push({type, detail});
+
+  // Statistiques + Fiche DOT (salaire/prime saisis à la main)
+  const P = new Map((prev.employees||[]).map(e=>[e.id,e]));
+  const N = new Map((next.employees||[]).map(e=>[e.id,e]));
+  const added = [], removed = [], chStats = [], chDot = [];
+  N.forEach((e,id)=>{
+    const o = P.get(id);
+    if(!o){ added.push(e.nom); return; }
+    const a = [], b = [];
+    [['grade','Grade'],['factures','Factures'],['runs','Runs'],['ventes','Ventes'],['part','Part'],['heures','Heures']].forEach(([k,l])=>{
+      if(String(o[k]) !== String(e[k])) a.push(l + ' ' + fv(o[k]) + ' → ' + fv(e[k]));
+    });
+    [['salaire','Salaire'],['prime','Prime']].forEach(([k,l])=>{
+      const mk = k + 'Manuel';
+      if(!!o[mk] !== !!e[mk]) b.push(l + (e[mk] ? ' passé en manuel (' + fv(e[k]) + ')' : ' remis en calcul auto'));
+      else if(e[mk] && String(o[k]) !== String(e[k])) b.push(l + ' (manuel) ' + fv(o[k]) + ' → ' + fv(e[k]));
+    });
+    if(a.length) chStats.push(e.nom + ' : ' + a.join(', '));
+    if(b.length) chDot.push(e.nom + ' : ' + b.join(', '));
+  });
+  P.forEach((e,id)=>{ if(!N.has(id)) removed.push(e.nom); });
+  if(removed.length && N.size === 0) push('Statistiques', 'Liste vidée (' + removed.length + ' lignes)');
+  else if(removed.length) push('Statistiques', removed.length + ' ligne(s) supprimée(s) : ' + lst(removed));
+  if(added.length) push('Statistiques', added.length + ' employé(s) ajouté(s) : ' + lst(added));
+  if(chStats.length > 4) push('Statistiques', 'Collage / mise à jour de ' + chStats.length + ' lignes — ' + lst(chStats, 3));
+  else chStats.forEach(c=>push('Statistiques', c));
+  chDot.forEach(c=>push('Fiche DOT', c));
+
+  // Gestion des employés
+  const RP = new Map((prev.roster||[]).map(e=>[e.id,e]));
+  const RN = new Map((next.roster||[]).map(e=>[e.id,e]));
+  const rAdded = [], rRemoved = [], rGrade = [];
+  RN.forEach((e,id)=>{
+    const o = RP.get(id);
+    if(!o) rAdded.push(e.nom + ' (' + e.grade + ')');
+    else if(o.grade !== e.grade) rGrade.push(e.nom + ' : ' + o.grade + ' → ' + e.grade);
+  });
+  RP.forEach((e,id)=>{ if(!RN.has(id)) rRemoved.push(e.nom); });
+  if(rRemoved.length && RN.size === 0) push('Gestion des employés', 'Liste vidée (' + rRemoved.length + ' employés)');
+  else if(rRemoved.length) push('Gestion des employés', rRemoved.length + ' employé(s) supprimé(s) : ' + lst(rRemoved));
+  if(rAdded.length) push('Gestion des employés', rAdded.length + ' employé(s) ajouté(s) : ' + lst(rAdded));
+  if(rGrade.length > 4) push('Gestion des employés', 'Rang modifié pour ' + rGrade.length + ' employés — ' + lst(rGrade, 3));
+  else rGrade.forEach(c=>push('Gestion des employés', c));
+
+  // Compte bancaire
+  const key = b => b.date + '|' + b.motif + '|' + b.montant;
+  const bp = prev.banque || [], bn = next.banque || [];
+  const remain = new Map();
+  bp.forEach(b=>{ const k = key(b); remain.set(k, (remain.get(k)||0) + 1); });
+  const bAdded = [];
+  bn.forEach(b=>{ const k = key(b); const c = remain.get(k)||0; if(c > 0) remain.set(k, c-1); else bAdded.push(b); });
+  const bRemoved = [];
+  bp.forEach(b=>{ const k = key(b); const c = remain.get(k)||0; if(c > 0){ bRemoved.push(b); remain.set(k, c-1); } });
+  const edits = [];
+  for(let i = bAdded.length - 1; i >= 0; i--){
+    const a = bAdded[i];
+    const j = bRemoved.findIndex(r => r.date === a.date && r.montant === a.montant && r.motif !== a.motif);
+    if(j >= 0){ edits.push('« ' + bRemoved[j].motif + ' » → « ' + a.motif + ' »'); bRemoved.splice(j,1); bAdded.splice(i,1); }
+  }
+  const lineB = b => b.date + ' ' + b.motif + ' ' + fv(b.montant) + '$';
+  edits.forEach(m=>push('Compte bancaire', 'Motif modifié : ' + m));
+  if(bRemoved.length && bn.length === 0) push('Compte bancaire', 'Historique vidé (' + bRemoved.length + ' mouvements)');
+  else if(bRemoved.length) push('Compte bancaire', bRemoved.length + ' mouvement(s) supprimé(s) : ' + lst(bRemoved.map(lineB), 3));
+  if(bAdded.length) push('Compte bancaire', bAdded.length + ' mouvement(s) ajouté(s) : ' + lst(bAdded.map(lineB), 3));
+  if((prev.soldeManuel||'') !== (next.soldeManuel||'')) push('Compte bancaire', 'Solde affiché : ' + prev.soldeManuel + ' → ' + next.soldeManuel);
+
+  // Archives
+  const AP = new Map((prev.archives||[]).map(a=>[a.id,a]));
+  const AN = new Map((next.archives||[]).map(a=>[a.id,a]));
+  AN.forEach((a,id)=>{
+    const o = AP.get(id);
+    if(!o) push('Archives', 'Fiche archivée : « ' + a.name + ' »');
+    else if(o.name !== a.name) push('Archives', 'Archive renommée : « ' + o.name + ' » → « ' + a.name + ' »');
+  });
+  AP.forEach((a,id)=>{ if(!AN.has(id)) push('Archives', 'Archive supprimée : « ' + a.name + ' »'); });
+  return out;
+}
+
+// ----- Sauvegarde partagée (serveur) -----
 function saveAll(){
+  if(!session) return;
   markSaving();
+  pendingSave = true;
+  saveSeq++;
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(()=>{
-    try{
-      localStorage.setItem(LS_PREFIX+'employees', JSON.stringify(employees));
-      localStorage.setItem(LS_PREFIX+'roster', JSON.stringify(roster));
-      localStorage.setItem(LS_PREFIX+'banque', JSON.stringify(banque));
-      localStorage.setItem(LS_PREFIX+'soldeManuel', soldeManuel);
-      localStorage.setItem(LS_PREFIX+'archives', JSON.stringify(archives));
-      localStorage.setItem(LS_PREFIX+'dotSettings', JSON.stringify(dotSettings));
-      markSaved();
-    }catch(e){
-      markError();
+  saveTimer = setTimeout(doSaveState, 600);
+}
+async function doSaveState(){
+  if(!session) return;
+  if(savingNow){ clearTimeout(saveTimer); saveTimer = setTimeout(doSaveState, 400); return; }
+  savingNow = true;
+  const mySeq = saveSeq;
+  const next = cloneState(collectState());
+  const entries = diffState(lastSavedSnapshot, next);
+  let res;
+  try{
+    res = await api('saveState', {state: next, baseVersion: localVersion});
+  } finally { savingNow = false; }
+  if(res && res.ok){
+    localVersion = res.version;
+    lastSavedSnapshot = next;
+    if(mySeq === saveSeq){ pendingSave = false; markSaved(); }
+    if(entries.length) api('log', {entries});
+  } else if(res && res.conflict){
+    applyState(res.state || {});
+    localVersion = res.version;
+    lastSavedSnapshot = cloneState(collectState());
+    pendingSave = false;
+    markSaved();
+    showToast("Quelqu'un d'autre a modifié les données en même temps : page mise à jour, refais ta dernière action si elle a disparu.");
+  } else {
+    markError(errText(res));
+    if(res && res.error === 'network'){ clearTimeout(saveTimer); saveTimer = setTimeout(doSaveState, 5000); }
+  }
+}
+function startPolling(){
+  clearInterval(pollTimer);
+  pollTimer = setInterval(async ()=>{
+    if(!session || pendingSave || savingNow || document.hidden) return;
+    const ae = document.activeElement;
+    if(ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT')) return;
+    const v = await api('getVersion');
+    if(!v || !v.ok || v.version === localVersion) return;
+    const s = await api('getState');
+    if(s && s.ok && s.state && !pendingSave){
+      applyState(s.state);
+      localVersion = s.version;
+      lastSavedSnapshot = cloneState(collectState());
+      showToast("Données mises à jour par un autre utilisateur");
     }
-  }, 300);
+  }, 20000);
 }
-async function loadAll(){
+// Anciennes données stockées dans ce navigateur (avant la version avec comptes) : import unique
+function loadLegacyLocal(){
   try{
-    const e = localStorage.getItem(LS_PREFIX+'employees');
-    if(e) employees = JSON.parse(e);
-  }catch(err){}
-  try{
-    const r = localStorage.getItem(LS_PREFIX+'roster');
-    if(r) roster = JSON.parse(r);
-  }catch(err){}
-  try{
-    const b = localStorage.getItem(LS_PREFIX+'banque');
-    if(b) banque = JSON.parse(b);
-  }catch(err){}
-  try{
-    const s = localStorage.getItem(LS_PREFIX+'soldeManuel');
-    if(s) soldeManuel = s;
-  }catch(err){}
-  try{
-    const a = localStorage.getItem(LS_PREFIX+'archives');
-    if(a) archives = JSON.parse(a);
-  }catch(err){}
-  try{
-    const d = localStorage.getItem(LS_PREFIX+'dotSettings');
-    if(d) dotSettings = JSON.parse(d);
-  }catch(err){}
+    const g = k => { const v = lsGet(LS_PREFIX + k); return v ? JSON.parse(v) : null; };
+    const emp = g('employees'), ros = g('roster'), ban = g('banque'), arc = g('archives'), dot = g('dotSettings');
+    const solde = lsGet(LS_PREFIX + 'soldeManuel');
+    if(!(emp && emp.length) && !(ros && ros.length) && !(ban && ban.length) && !(arc && arc.length)) return null;
+    return {employees: emp||[], roster: ros||[], banque: ban||[], archives: arc||[], soldeManuel: solde||'0$', dotSettings: dot||{}};
+  }catch(e){ return null; }
 }
+window.addEventListener('beforeunload', ev=>{ if(pendingSave){ ev.preventDefault(); ev.returnValue = ''; } });
 function genId(){
   return String(Math.floor(100000 + Math.random()*899999));
 }
@@ -1394,15 +1643,15 @@ function syncToGoogleSheet(){
     ]
   };
 
-  fetch(SHEET_WEBHOOK_URL, {
-    method: "POST",
-    mode: "no-cors",
-    headers: {"Content-Type": "text/plain;charset=utf-8"},
-    body: JSON.stringify(payload)
-  }).then(()=>{
-    showToast("Envoyé vers Google Sheets");
-  }).catch(()=>{
-    showToast("Échec de l'envoi vers Google Sheets (connexion)");
+  api('sheetWrite', {writes: payload.writes}).then(r=>{
+    if(r && r.ok){
+      showToast("Envoyé vers Google Sheets");
+      logNow('Envoi Google Sheets', "Fiche envoyée vers l'onglet « " + SHEET_TAB_NAME + " »");
+    } else {
+      const msg = errText(r);
+      showToast("Échec de l'envoi vers Google Sheets : " + msg);
+      logNow('Échec envoi Google Sheets', msg);
+    }
   });
 }
 
@@ -1713,17 +1962,206 @@ document.getElementById('archiveDotBtn').addEventListener('click', ()=>{
   showToast("Fiche archivée sous « "+defaultName+" » — clique sur le nom pour la renommer");
 });
 
-async function init(){
-  await loadAll();
-  renderStats();
-  renderEmployes();
-  renderBanque();
-  renderBaremes();
-  renderDot();
-  renderArchives();
-  markSaved();
+// ===== Connexion / comptes =====
+let loginMode = 'login';
+function setLoginError(msg){ document.getElementById('loginError').textContent = msg || ''; }
+function errText(res){
+  if(!res) return 'Erreur inconnue';
+  if(res.message) return res.message;
+  if(res.error === 'network') return 'Impossible de joindre le serveur. Vérifie ta connexion.';
+  if(res.error === 'badresponse') return "Réponse invalide du serveur : le script Apps Script n'est probablement pas à jour (redéploie une nouvelle version).";
+  return 'Erreur : ' + (res.error || 'inconnue');
 }
-init();
+function showLogin(mode, msg){
+  loginMode = mode;
+  document.getElementById('loginOverlay').style.display = 'flex';
+  document.getElementById('loginLoading').style.display = 'none';
+  document.getElementById('loginForm').style.display = '';
+  const setup = mode === 'setup';
+  document.getElementById('loginTitle').textContent = setup ? 'Créer le compte administrateur' : 'Connexion';
+  document.getElementById('loginSub').textContent = setup
+    ? "Premier lancement : choisis l'identifiant et le mot de passe de l'administrateur (toi). Tu pourras ensuite ajouter les autres comptes."
+    : 'Identifie-toi pour accéder à la comptabilité Umami.';
+  document.getElementById('loginPass2').style.display = setup ? '' : 'none';
+  document.getElementById('loginBtn').textContent = setup ? 'Créer le compte' : 'Se connecter';
+  document.getElementById('loginPass').value = '';
+  document.getElementById('loginPass2').value = '';
+  setLoginError(msg);
+}
+function showLoginFatal(msg){
+  document.getElementById('loginOverlay').style.display = 'flex';
+  document.getElementById('loginLoading').style.display = 'none';
+  document.getElementById('loginForm').style.display = 'none';
+  setLoginError(msg);
+}
+function hideLogin(){ document.getElementById('loginOverlay').style.display = 'none'; }
+function handleAuthLost(){
+  lsDel(SESSION_KEY);
+  session = null;
+  showLogin('login', 'Session expirée, reconnecte-toi.');
+}
+
+async function submitLogin(){
+  const u = document.getElementById('loginUser').value.trim();
+  const p = document.getElementById('loginPass').value;
+  const p2 = document.getElementById('loginPass2').value;
+  if(!u || !p){ setLoginError('Renseigne ton identifiant et ton mot de passe.'); return; }
+  if(loginMode === 'setup' && p !== p2){ setLoginError('Les deux mots de passe ne sont pas identiques.'); return; }
+  const btn = document.getElementById('loginBtn');
+  btn.disabled = true; setLoginError('');
+  const res = await api(loginMode === 'setup' ? 'setup' : 'login', {username: u, password: p});
+  btn.disabled = false;
+  if(res && res.ok && res.token){
+    session = {token: res.token, username: res.username, role: res.role};
+    lsSet(SESSION_KEY, JSON.stringify(session));
+    document.getElementById('loginPass').value = '';
+    document.getElementById('loginPass2').value = '';
+    await enterApp();
+  } else if(res && res.ok){
+    setLoginError("Réponse inattendue : le script Apps Script n'est pas à jour (redéploie une nouvelle version).");
+  } else {
+    setLoginError(errText(res));
+  }
+}
+
+async function enterApp(){
+  hideLogin(); setLoginError('');
+  document.getElementById('userBoxName').textContent = session.username + (session.role === 'admin' ? ' (admin)' : '');
+  document.querySelectorAll('.admin-only').forEach(el=>{ el.style.display = session.role === 'admin' ? '' : 'none'; });
+  const res = await api('getState');
+  if(!res || !res.ok){
+    if(!res || res.error !== 'auth') showToast('Chargement des données impossible : ' + errText(res));
+    return;
+  }
+  localVersion = res.version || 0;
+  if(res.state){
+    applyState(res.state);
+    lastSavedSnapshot = cloneState(collectState());
+  } else {
+    const legacy = loadLegacyLocal();
+    if(legacy){
+      applyState(legacy);
+      lastSavedSnapshot = cloneState(collectState());
+      saveAll();
+      logNow('Import', 'Données de ce navigateur importées sur le serveur');
+      showToast('Tes données locales ont été importées sur le serveur');
+    } else {
+      applyState({});
+      lastSavedSnapshot = cloneState(collectState());
+    }
+  }
+  markSaved();
+  startPolling();
+}
+
+async function bootApp(){
+  document.getElementById('loginLogo').src = document.querySelector('.brand img').src;
+  const saved = lsGet(SESSION_KEY);
+  if(saved){ try{ session = JSON.parse(saved); }catch(e){ session = null; } }
+  if(session && session.token){
+    const me = await api('me');
+    if(me && me.ok){ session.username = me.username; session.role = me.role; await enterApp(); return; }
+    if(me && me.error === 'network'){ showLoginFatal(errText(me) + ' Recharge la page.'); return; }
+    session = null; lsDel(SESSION_KEY);
+  }
+  const st = await api('status');
+  if(!st || !st.ok || typeof st.hasUsers !== 'boolean'){
+    showLoginFatal(st && st.error === 'network' ? errText(st)
+      : "Le script Apps Script n'est pas à jour (ou injoignable). Colle le nouveau code, redéploie une nouvelle version puis recharge cette page.");
+    return;
+  }
+  showLogin(st.hasUsers ? 'login' : 'setup');
+}
+
+document.getElementById('loginBtn').addEventListener('click', submitLogin);
+['loginUser','loginPass','loginPass2'].forEach(id=>{
+  document.getElementById(id).addEventListener('keydown', ev=>{ if(ev.key === 'Enter') submitLogin(); });
+});
+document.getElementById('logoutBtn').addEventListener('click', async ()=>{
+  clearTimeout(saveTimer);
+  if(pendingSave) await doSaveState();
+  await api('logout');
+  lsDel(SESSION_KEY);
+  location.reload();
+});
+
+// ===== Pages réservées à l'administrateur =====
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let logsCache = [];
+
+async function loadJournal(){
+  const body = document.getElementById('journalBody');
+  body.innerHTML = '<tr><td colspan="4" class="empty">Chargement…</td></tr>';
+  const r = await api('getLogs', {limit: 1000});
+  if(!r || !r.ok){ body.innerHTML = '<tr><td colspan="4" class="empty">' + esc(errText(r)) + '</td></tr>'; return; }
+  logsCache = r.logs || [];
+  const users = Array.from(new Set(logsCache.map(l=>l.u))).sort();
+  const sel = document.getElementById('journalUser');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">Tous les utilisateurs</option>' + users.map(u=>'<option value="' + esc(u) + '">' + esc(u) + '</option>').join('');
+  sel.value = users.includes(cur) ? cur : '';
+  renderJournal();
+}
+function renderJournal(){
+  const u = document.getElementById('journalUser').value;
+  const q = document.getElementById('journalSearch').value.toLowerCase();
+  const list = logsCache.filter(l => (!u || l.u === u) && (!q || (l.type + ' ' + l.detail + ' ' + l.u).toLowerCase().includes(q)));
+  document.getElementById('journalBody').innerHTML = list.length
+    ? list.map(l=>'<tr><td style="white-space:nowrap;">' + esc(new Date(l.t).toLocaleString('fr-FR')) + '</td><td>' + esc(l.u) + '</td><td>' + esc(l.type)
+        + '</td><td style="max-width:640px; white-space:normal; word-break:break-word;">' + esc(l.detail) + '</td></tr>').join('')
+    : '<tr><td colspan="4" class="empty">Aucune entrée.</td></tr>';
+}
+document.getElementById('journalRefreshBtn').addEventListener('click', loadJournal);
+document.getElementById('journalUser').addEventListener('change', renderJournal);
+document.getElementById('journalSearch').addEventListener('input', renderJournal);
+
+async function loadUsers(){
+  const body = document.getElementById('usersBody');
+  body.innerHTML = '<tr><td colspan="5" class="empty">Chargement…</td></tr>';
+  const r = await api('listUsers');
+  if(!r || !r.ok){ body.innerHTML = '<tr><td colspan="5" class="empty">' + esc(errText(r)) + '</td></tr>'; return; }
+  body.innerHTML = r.users.map(u=>{
+    const self = session && u.username.toLowerCase() === session.username.toLowerCase();
+    return '<tr><td>' + esc(u.username) + '</td><td>' + (u.role === 'admin' ? 'Administrateur' : 'Utilisateur') + '</td><td>'
+      + esc(u.createdAt ? new Date(u.createdAt).toLocaleDateString('fr-FR') : '') + '</td><td>' + esc(u.createdBy || '')
+      + '</td><td style="text-align:right; white-space:nowrap;"><button class="copy-btn" data-reset="' + esc(u.username) + '">Mot de passe</button> '
+      + (self ? '' : '<button class="btn-icon" data-deluser="' + esc(u.username) + '" title="Supprimer le compte">✕</button>') + '</td></tr>';
+  }).join('');
+}
+document.getElementById('addUserBtn').addEventListener('click', async ()=>{
+  const u = document.getElementById('newUserName').value.trim();
+  const p = document.getElementById('newUserPass').value;
+  if(!u || !p){ showToast('Renseigne un identifiant et un mot de passe'); return; }
+  const r = await api('addUser', {username: u, password: p});
+  if(r && r.ok){
+    document.getElementById('newUserName').value = '';
+    document.getElementById('newUserPass').value = '';
+    showToast('Compte « ' + u + ' » créé');
+    loadUsers();
+  } else showToast(errText(r));
+});
+document.getElementById('usersBody').addEventListener('click', async ev=>{
+  const t = ev.target.closest('[data-reset],[data-deluser]');
+  if(!t) return;
+  if(t.dataset.reset){
+    const pw = prompt('Nouveau mot de passe pour « ' + t.dataset.reset + ' » (6 caractères minimum) :');
+    if(!pw) return;
+    const r = await api('resetPassword', {username: t.dataset.reset, password: pw});
+    showToast(r && r.ok ? 'Mot de passe modifié' : errText(r));
+  } else if(t.dataset.deluser){
+    if(!confirm('Supprimer le compte « ' + t.dataset.deluser + ' » ?')) return;
+    const r = await api('deleteUser', {username: t.dataset.deluser});
+    if(r && r.ok){ showToast('Compte supprimé'); loadUsers(); } else showToast(errText(r));
+  }
+});
+document.querySelectorAll('.nav-item').forEach(item=>{
+  item.addEventListener('click', ()=>{
+    if(item.dataset.page === 'journal') loadJournal();
+    if(item.dataset.page === 'comptes') loadUsers();
+  });
+});
+
+bootApp();
 </script>
 </body>
 </html>
