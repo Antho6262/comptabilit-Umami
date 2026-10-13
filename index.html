@@ -557,6 +557,7 @@ input[type="password"]:focus{border-color:var(--accent);}
           <p>Généré automatiquement depuis Statistiques et Compte bancaire, sur le modèle exact de ta fiche Google Sheets. Salaire/Prime par employé et les plafonds restent éditables.</p>
         </div>
         <div style="display:flex; gap:10px;">
+          <input type="text" id="sheetTabInput" title="Nom de l'onglet créé dans le Google Sheet (vide = automatique, d'après la semaine)" style="width:190px;">
           <button class="btn-ghost btn" id="syncSheetBtn" style="border:1px solid var(--border);">Envoyer vers Google Sheets</button>
           <button class="btn" id="archiveDotBtn">Archiver cette fiche (nouvelle semaine)</button>
         </div>
@@ -608,7 +609,7 @@ input[type="password"]:focus{border-color:var(--accent);}
           </thead>
           <tbody id="dotEmpBody"></tbody>
         </table>
-        <div class="foot-note" style="padding:0 18px 16px;">Makis = Run ÷ 5. De Rs Runner à Maître Sushi : Prime auto (barème Makis). Chef d'équipe : Salaire + Prime auto (barème Makis). Serveur : Salaire = % de la Facture (30/35/40/45%). Chef de Rang : Salaire = 12,5% du Salaire Maximum employé. Rs Événementiel / Assistant Événementiel / RS Boutique : Salaire = 25%. Directeur Général / Marketing : Salaire = 50%. Patron / Co-Patron : Salaire = 100% du Salaire Maximum patron. Bonus événement (2000$/h) jamais inclus. Toutes les cases restent modifiables à la main (clic) — double-clic pour revenir au calcul automatique.</div>
+        <div class="foot-note" style="padding:0 18px 16px;">Makis = Run ÷ 5. Rs Runner / Employé (colonne Runners), Runner Expérimenté, Maître Sushi : uniquement une Prime selon la grille « primes par virement » (Salaire = 0). Chef d'équipe : Salaire + Prime selon la grille. Serveur : Salaire = % de la Facture (20 % jusqu'à 29 999$, 30 % dès 30 000$, 35 % dès 50 000$, 40 % dès 70 000$, 45 % dès 100 000$). Chef de Rang : 12,5 % du Salaire Maximum employé ; RS : 25 % ; Directeurs : 50 % ; Patron / Co-Patron : 100 % du Salaire Maximum patron. Bonus événement (2000$/h) jamais inclus. Toutes les cases restent modifiables à la main (clic) — double-clic pour revenir au calcul automatique.</div>
       </div>
 
       <div class="card" style="margin-bottom:24px;">
@@ -1522,137 +1523,166 @@ function lookupBracket(brackets, value){
   return null;
 }
 
-// Barèmes de salaire/prime selon le nombre de makis (RUN / 5)
+// Grilles de salaire / prime selon le nombre de makis (Run ÷ 5) — grille mise à jour
+// Runners : seules les PRIMES (par virement) comptent ; null = "/" (pas de prime à ce palier)
 const runnerScale = [
-  {quota:2000, salaire:16000},
-  {quota:2500, salaire:20000},
-  {quota:3000, salaire:24000},
-  {quota:4000, salaire:32000},
-  {quota:5000, salaire:40000},
-  {quota:7000, salaire:56000},
-  {quota:10000, salaire:80000},
-  {quota:12500, salaire:100000},
-  {quota:15000, salaire:120000},
-  {quota:20000, salaire:160000},
-  {quota:30000, salaire:240000}
+  {quota:2000,  runners:2500,  exp:null,  ms:null},
+  {quota:2500,  runners:3000,  exp:null,  ms:null},
+  {quota:3000,  runners:4000,  exp:null,  ms:null},
+  {quota:4000,  runners:5250,  exp:6250,  ms:null},
+  {quota:5000,  runners:6250,  exp:9250,  ms:null},
+  {quota:7000,  runners:11500, exp:13750, ms:16000},
+  {quota:10000, runners:16000, exp:18500, ms:21750},
+  {quota:12500, runners:19500, exp:21750, ms:25250},
+  {quota:15000, runners:25500, exp:28750, ms:32250},
+  {quota:20000, runners:42500, exp:46000, ms:49500},
+  {quota:30000, runners:59000, exp:62000, ms:65000}
 ];
+// Chefs d'équipe : Salaire + Prime (le bonus événement de 2000$/h n'est jamais inclus)
 const chefEquipeScale = [
-  {quota:3000, salaire:24000, prime:5000},
-  {quota:4000, salaire:32000, prime:7000},
-  {quota:5000, salaire:40000, prime:10000},
-  {quota:6000, salaire:48000, prime:12000},
-  {quota:7000, salaire:56000, prime:16000},
-  {quota:10000, salaire:80000, prime:24000},
-  {quota:12500, salaire:100000, prime:30000},
-  {quota:15000, salaire:120000, prime:40000},
-  {quota:20000, salaire:160000, prime:55000},
-  {quota:30000, salaire:240000, prime:70000}
+  {quota:3000,  salaire:24000,  prime:5500},
+  {quota:4000,  salaire:32000,  prime:7700},
+  {quota:5000,  salaire:40000,  prime:11000},
+  {quota:6000,  salaire:48000,  prime:13200},
+  {quota:7000,  salaire:56000,  prime:17600},
+  {quota:10000, salaire:80000,  prime:26400},
+  {quota:12500, salaire:100000, prime:33000},
+  {quota:15000, salaire:120000, prime:44000},
+  {quota:20000, salaire:160000, prime:60500},
+  {quota:30000, salaire:240000, prime:89500}
 ];
-const runnerGrades = ["Rs Runner","Runner Expérimenté","Maître Sushi"];
+// Serveurs : salaire = % du C.A. (leur Facture) selon le palier
 const serverScale = [
-  {quota:0, rate:0.30},
-  {quota:50000, rate:0.35},
-  {quota:70000, rate:0.40},
+  {quota:0,      rate:0.20},
+  {quota:30000,  rate:0.30},
+  {quota:50000,  rate:0.35},
+  {quota:70000,  rate:0.40},
   {quota:100000, rate:0.45}
 ];
-function lookupScale(scale, makis){
-  let result = null;
-  for(const tier of scale){ if(makis >= tier.quota) result = tier; }
-  return result;
+// Clé de comparaison d'un grade : sans accents, majuscules, apostrophes ni espaces ("Chef d'équipe" = "Chef Équipe")
+function gk(g){ return String(g == null ? '' : g).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,''); }
+function lookupScale(scale, v){
+  let r = null;
+  for(const t of scale){ if(v >= t.quota) r = t; }
+  return r;
 }
+const RUNNER_COL = {rsrunner:'runners', runner:'runners', employe:'runners', runnerexperimente:'exp', maitresushi:'ms'};
 function applyPayScale(e){
+  const k = gk(e.grade);
   const makis = Math.floor((e.runs||0)/5);
-  if(runnerGrades.includes(e.grade)){
+  if(RUNNER_COL[k]){
+    // De Runner à Maître Sushi : uniquement une prime (colonne du grade), pas de salaire
     const tier = lookupScale(runnerScale, makis);
     if(!e.salaireManuel) e.salaire = 0;
-    if(!e.primeManuel) e.prime = tier ? tier.salaire : 0;
+    if(!e.primeManuel) e.prime = (tier && tier[RUNNER_COL[k]]) || 0;
     return;
   }
-  if(e.grade === "Chef d'équipe"){
+  if(k === 'chefdequipe' || k === 'chefequipe'){
     const tier = lookupScale(chefEquipeScale, makis);
     if(!e.salaireManuel) e.salaire = tier ? tier.salaire : 0;
     if(!e.primeManuel) e.prime = tier ? tier.prime : 0;
     return;
   }
-  if(e.grade === "Serveur"){
+  if(k === 'serveur'){
     const tier = lookupScale(serverScale, e.factures||0);
     if(!e.salaireManuel) e.salaire = tier ? Math.round((e.factures||0)*tier.rate) : 0;
     return;
   }
 }
 
-// Barème des primes (% du Salaire Maximum de la semaine, selon le grade) -> rempli en Salaire
-const rsTierGrades = ["Rs Événementiel","Assistant Événementiel","RS Boutique"];
-const directeurTierGrades = ["Directeur Général","Directeur Marketing"];
-const directionTopGrades = ["Patron","Co-Patron"];
+// Barème en % du Salaire Maximum de la semaine, selon le grade -> rempli en Salaire
 function applyRankSalaryScale(e, plafonds){
   if(e.salaireManuel) return; // respecte une modification manuelle
+  const k = gk(e.grade);
   const salMax = (plafonds && plafonds.salMax) || 0;
   const salMaxPatron = (plafonds && plafonds.salMaxPatron) || 0;
-  if(e.grade === "Chef de Rang"){ e.salaire = Math.round(salMax * 0.125); return; }
-  if(rsTierGrades.includes(e.grade)){ e.salaire = Math.round(salMax * 0.25); return; }
-  if(directeurTierGrades.includes(e.grade)){ e.salaire = Math.round(salMax * 0.50); return; }
-  if(directionTopGrades.includes(e.grade)){ e.salaire = Math.round(salMaxPatron * 1.0); return; }
+  if(k === 'chefderang'){ e.salaire = Math.round(salMax * 0.125); return; }
+  if(k === 'assistantevenementiel' || (k.startsWith('rs') && k !== 'rsrunner')){ e.salaire = Math.round(salMax * 0.25); return; }
+  if(k.startsWith('directeur')){ e.salaire = Math.round(salMax * 0.50); return; }
+  if(k === 'patron' || k === 'patronne' || k.startsWith('copatron')){ e.salaire = Math.round(salMaxPatron * 1.0); return; }
 }
 
 let dotSettings = {};
 
-// Envoi automatique vers Google Sheets (Apps Script Web App)
+// Envoi vers Google Sheets : le script duplique l'onglet modèle « COPIE 2 » (formules, mise en page,
+// bloc « Informations légales ») puis remplit uniquement les cellules de saisie.
 const SHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbyX2XMw5SUlrapkND9QpI-NFKxkX5Gjx5HrS6KApt7Xq5DCrJQuXeMY7mK3dmWcMTY/exec";
-const SHEET_TAB_NAME = "Site Test";
+const SHEET_TEMPLATE_TAB = "COPIE 2";
 
-function syncToGoogleSheet(){
-  if(!SHEET_WEBHOOK_URL) return;
-  const calc = computeBeneficeAndPlafonds();
-  const plafonds = calc.plafonds;
+function isoWeekOf(d){
+  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const day = t.getUTCDay() || 7;
+  t.setUTCDate(t.getUTCDate() + 4 - day);
+  const y0 = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
+  return Math.ceil(((t - y0) / 86400000 + 1) / 7);
+}
+function parseFrDate(s){
+  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(String(s || '').trim());
+  return m ? new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1])) : null;
+}
+// Semaine comptable déduite de la plus ancienne date du compte bancaire (sinon semaine en cours)
+function weekInfo(){
+  const ds = banque.map(b=>parseFrDate(b.date)).filter(Boolean).sort((a,b)=>a-b);
+  const ref = ds.length ? ds[0] : new Date();
+  const monday = new Date(ref.getFullYear(), ref.getMonth(), ref.getDate() - ((ref.getDay() + 6) % 7));
+  const sunday = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 6);
+  return {week: isoWeekOf(monday), monday, sunday};
+}
+function suggestTabName(){ return 'Site S.' + weekInfo().week; }
+function fmtOuverture(d){
+  const p = n => String(n).padStart(2, '0');
+  return p(d.getDate()) + '/' + p(d.getMonth() + 1) + '/' + String(d.getFullYear()).slice(-2) + '  0h00';
+}
 
-  if(!dotSettings.ouverture) dotSettings.ouverture = new Date().toISOString();
-  dotSettings.fermeture = new Date().toISOString();
-  saveAll();
-  const fmtDateHeure = (iso)=>{
-    const d = new Date(iso);
-    return d.getDate()+"/"+(d.getMonth()+1)+"/"+String(d.getFullYear()).slice(-2)+" "+d.getHours()+"h"+String(d.getMinutes()).padStart(2,'0');
-  };
-
-  const empRows = employees.map(e=>{
-    const total = e.factures + e.runs + e.ventes;
-    return [e.nom, e.grade, e.factures, e.runs, e.ventes, total, e.salaire||0, e.prime||0];
-  });
-  const entrees = banque.filter(b=>b.montant>0);
-  const entreeRows = entrees.map(b=>[b.date, b.motif, b.montant, "", "", b.montant]);
-  const retraits = banque.filter(b=>b.montant<0 && /wwi|vcmc/i.test(b.motif));
-  const depensesAutres = banque.filter(b=>b.montant<0 && !/wwi|vcmc/i.test(b.motif) && !/^salaire\s*\/?\s*prime/i.test(b.motif.trim()) && !/^imp[oô]t/i.test(b.motif.trim()));
-  const salaireTotal = employees.reduce((s,e)=>s+(e.salaire||0), 0);
-  const retraitsTotal = retraits.reduce((s,b)=>s+Math.abs(b.montant), 0);
-  const depensesRows = [["**************","Salaire", salaireTotal], ...depensesAutres.map(b=>[b.date, b.motif, Math.abs(b.montant)])];
-  const retraitsRows = [["**************","Total", retraitsTotal], ...retraits.map(b=>[b.date, b.motif, Math.abs(b.montant)])];
-  const entreesStartRow = 8 + Math.max(employees.length,1) + 2;
-
-  const payload = {
-    writes: [
-      {sheetName: SHEET_TAB_NAME, mode:"overwrite", startRow:8, startCol:1, rows: empRows.length?empRows:[["","","","","","","",""]], numberFormatCol: 3},
-      {sheetName: SHEET_TAB_NAME, mode:"overwrite", startRow:entreesStartRow, startCol:1, rows: entreeRows.length?entreeRows:[["","","","","",""]], numberFormatCol: 3},
-      {sheetName: SHEET_TAB_NAME, mode:"overwrite", startRow:31, startCol:10, rows: depensesRows, numberFormatCol: 3},
-      {sheetName: SHEET_TAB_NAME, mode:"overwrite", startRow:31, startCol:13, rows: retraitsRows, numberFormatCol: 3},
-      {sheetName: SHEET_TAB_NAME, mode:"overwrite", startRow:1, startCol:2, rows: [[plafonds.salMax||0]], numberFormatCol: 1},
-      {sheetName: SHEET_TAB_NAME, mode:"overwrite", startRow:1, startCol:4, rows: [[plafonds.primeMax||0]], numberFormatCol: 1},
-      {sheetName: SHEET_TAB_NAME, mode:"overwrite", startRow:3, startCol:2, rows: [[plafonds.salMaxPatron||0]], numberFormatCol: 1},
-      {sheetName: SHEET_TAB_NAME, mode:"overwrite", startRow:3, startCol:4, rows: [[plafonds.primeMaxPatron||0]], numberFormatCol: 1},
-      {sheetName: SHEET_TAB_NAME, mode:"overwrite", startRow:1, startCol:7, rows: [[fmtDateHeure(dotSettings.ouverture)]]},
-      {sheetName: SHEET_TAB_NAME, mode:"overwrite", startRow:3, startCol:7, rows: [[fmtDateHeure(dotSettings.fermeture)]]}
-    ]
-  };
-
-  api('sheetWrite', {writes: payload.writes}).then(r=>{
+let syncTimer = null;
+let syncRunning = false;
+function syncToGoogleSheet(opts){
+  opts = opts || {};
+  clearTimeout(syncTimer);
+  if(opts.manual) return doSyncToSheet(true);
+  syncTimer = setTimeout(()=>doSyncToSheet(false), 1500); // envoi automatique après un collage
+}
+async function doSyncToSheet(manual){
+  if(!session) return;
+  if(syncRunning){ if(!manual) syncTimer = setTimeout(()=>doSyncToSheet(false), 2500); return; }
+  syncRunning = true;
+  try{
+    const tab = (dotSettings.sheetTab || '').trim() || suggestTabName();
+    const known = (dotSettings.siteTabs || []).includes(tab);
+    if(!known){
+      const info = await api('sheetInfo', {tab, template: SHEET_TEMPLATE_TAB});
+      if(info && info.ok && info.exists){
+        if(!manual){
+          showToast("Envoi automatique ignoré : l'onglet « " + tab + " » existe déjà et n'a pas été créé par le site. Clique sur « Envoyer vers Google Sheets » pour confirmer.");
+          return;
+        }
+        if(!confirm("L'onglet « " + tab + " » existe déjà. Les tableaux employés, entrées, dépenses et retraits seront remplacés. Continuer ?")) return;
+      } else if(info && info.ok && !info.hasTemplate){
+        showToast("Modèle introuvable : il faut un onglet « " + SHEET_TEMPLATE_TAB + " » dans le Google Sheet.");
+        return;
+      }
+    }
+    const wk = weekInfo();
+    const payload = {
+      tab, template: SHEET_TEMPLATE_TAB,
+      employees: employees.map(e=>[e.nom, e.grade, e.factures, e.runs, e.ventes, e.salaire||0, e.prime||0]),
+      entries: banque.filter(b=>b.montant>0).map(b=>[b.date, b.motif, b.montant]),
+      retraits: banque.filter(b=>b.montant<0 && /wwi|vcmc/i.test(b.motif)).map(b=>[b.date, b.motif, Math.abs(b.montant)]),
+      depenses: banque.filter(b=>b.montant<0 && !/wwi|vcmc/i.test(b.motif) && !/^salaire\s*\/?\s*prime/i.test(b.motif.trim()) && !/^imp[oô]t/i.test(b.motif.trim())).map(b=>[b.date, b.motif, Math.abs(b.montant)]),
+      opening: fmtOuverture(wk.monday), closing: fmtOuverture(wk.sunday),
+      solde: toNumber(soldeManuel)
+    };
+    const r = await api('buildSheet', payload);
     if(r && r.ok){
-      showToast("Envoyé vers Google Sheets");
-      logNow('Envoi Google Sheets', "Fiche envoyée vers l'onglet « " + SHEET_TAB_NAME + " »");
+      if(!known){ dotSettings.siteTabs = (dotSettings.siteTabs || []).concat(tab); saveAll(); }
+      showToast(r.created ? "Onglet « " + tab + " » créé depuis le modèle et rempli" : "Onglet « " + tab + " » mis à jour");
+      logNow('Envoi Google Sheets', (r.created ? "Onglet créé et rempli : « " : "Onglet mis à jour : « ") + tab + " »");
     } else {
       const msg = errText(r);
       showToast("Échec de l'envoi vers Google Sheets : " + msg);
       logNow('Échec envoi Google Sheets', msg);
     }
-  });
+  } finally { syncRunning = false; }
 }
 
 function computeBeneficeAndPlafonds(){
@@ -1674,6 +1704,9 @@ function computeBeneficeAndPlafonds(){
 
 function renderDot(){
   document.getElementById('dispReleveBancaire').textContent = fmt(toNumber(soldeManuel));
+  const tabIn = document.getElementById('sheetTabInput');
+  if(document.activeElement !== tabIn) tabIn.value = dotSettings.sheetTab || '';
+  tabIn.placeholder = 'Onglet : auto (' + suggestTabName() + ')';
 
   // Passe 1 : calculs qui ne dépendent pas des plafonds (Makis/Chef d'équipe/Serveur)
   employees.forEach(e=>{
@@ -1848,11 +1881,11 @@ function renderDot(){
     copyText(lines.join("\n"), "Entrées copiées");
   };
   document.getElementById('copyDotDepensesBtn').onclick = ()=>{
-    const lines = ["**************\tSalaire\t"+salaireTotal, ...depensesAutres.map(b=>[b.date, b.motif, Math.abs(b.montant)].join("\t"))];
+    const lines = depensesAutres.map(b=>[b.date, b.motif, Math.abs(b.montant)].join("\t"));
     copyText(lines.join("\n"), "Dépense déductible copiée");
   };
   document.getElementById('copyDotRetraitsBtn').onclick = ()=>{
-    const lines = ["**************\tTotal\t"+retraitsTotal, ...retraits.map(b=>[b.date, b.motif, Math.abs(b.montant)].join("\t"))];
+    const lines = retraits.map(b=>[b.date, b.motif, Math.abs(b.montant)].join("\t"));
     copyText(lines.join("\n"), "Tableau des retraits copié");
   };
 }
@@ -1932,7 +1965,12 @@ function renderArchives(){
 }
 
 document.getElementById('syncSheetBtn').addEventListener('click', ()=>{
-  syncToGoogleSheet();
+  syncToGoogleSheet({manual:true});
+});
+document.getElementById('sheetTabInput').addEventListener('change', ()=>{
+  dotSettings.sheetTab = document.getElementById('sheetTabInput').value.trim();
+  saveAll();
+  renderDot();
 });
 
 document.getElementById('archiveDotBtn').addEventListener('click', ()=>{
