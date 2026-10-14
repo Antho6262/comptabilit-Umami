@@ -1560,21 +1560,33 @@ const serverScale = [
   {quota:100000, rate:0.45}
 ];
 // Clé de comparaison d'un grade : sans accents, majuscules, apostrophes ni espaces ("Chef d'équipe" = "Chef Équipe")
-function gk(g){ return String(g == null ? '' : g).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,''); }
+// Les grades du jeu ont la forme « Rang - Rôle - » (ex. « Kohai - Runner - », « Hayate - MS - ») : on ne garde que le rôle.
+function roleOf(g){
+  const parts = String(g == null ? '' : g).trim().split(/\s+-\s+|\s+-$/).map(x=>x.replace(/^-+|-+$/g,'').trim()).filter(Boolean);
+  return parts.length > 1 ? parts.slice(1).join(' ') : (parts[0] || '');
+}
+function gk(g){ return roleOf(g).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,''); }
+// Colonne de la grille des runners selon le rôle : Runner / Employé -> runners ; Runner Xp -> exp ; MS / Maître Sushi -> ms
+function runnerColOf(k){
+  if(k === 'ms' || k.includes('maitresushi')) return 'ms';
+  if(k.includes('runner')) return (k.includes('xp') || k.includes('experimente')) ? 'exp' : 'runners';
+  if(k === 'employe') return 'runners';
+  return null;
+}
 function lookupScale(scale, v){
   let r = null;
   for(const t of scale){ if(v >= t.quota) r = t; }
   return r;
 }
-const RUNNER_COL = {rsrunner:'runners', runner:'runners', employe:'runners', runnerexperimente:'exp', maitresushi:'ms'};
 function applyPayScale(e){
   const k = gk(e.grade);
   const makis = Math.floor((e.runs||0)/5);
-  if(RUNNER_COL[k]){
+  const col = runnerColOf(k);
+  if(col){
     // De Runner à Maître Sushi : uniquement une prime (colonne du grade), pas de salaire
     const tier = lookupScale(runnerScale, makis);
     if(!e.salaireManuel) e.salaire = 0;
-    if(!e.primeManuel) e.prime = (tier && tier[RUNNER_COL[k]]) || 0;
+    if(!e.primeManuel) e.prime = (tier && tier[col]) || 0;
     return;
   }
   if(k === 'chefdequipe' || k === 'chefequipe'){
@@ -1597,7 +1609,7 @@ function applyRankSalaryScale(e, plafonds){
   const salMax = (plafonds && plafonds.salMax) || 0;
   const salMaxPatron = (plafonds && plafonds.salMaxPatron) || 0;
   if(k === 'chefderang'){ e.salaire = Math.round(salMax * 0.125); return; }
-  if(k === 'assistantevenementiel' || (k.startsWith('rs') && k !== 'rsrunner')){ e.salaire = Math.round(salMax * 0.25); return; }
+  if(k === 'assistantevenementiel' || (k.startsWith('rs') && !k.includes('runner'))){ e.salaire = Math.round(salMax * 0.25); return; }
   if(k.startsWith('directeur')){ e.salaire = Math.round(salMax * 0.50); return; }
   if(k === 'patron' || k === 'patronne' || k.startsWith('copatron')){ e.salaire = Math.round(salMaxPatron * 1.0); return; }
 }
