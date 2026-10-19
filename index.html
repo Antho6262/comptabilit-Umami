@@ -788,7 +788,7 @@ function splitLine(line){
 }
 function toNumber(v){
   if(v===undefined || v===null) return 0;
-  const cleaned = String(v).replace(/[^0-9,.\-]/g,'').replace(',', '.');
+  const cleaned = String(v).replace(/[\u2212\u2013\u2014]/g,'-').replace(/[^0-9,.\-]/g,'').replace(',', '.');
   const n = parseFloat(cleaned);
   return isNaN(n) ? 0 : n;
 }
@@ -1468,13 +1468,16 @@ document.getElementById('pasteEmp').addEventListener('paste', ()=>{
 // bout à bout sur une seule ligne. On extrait via une regex globale sur tout le texte.
 function parseBanquePaste(text){
   const blob = text.replace(/\r?\n/g, '');
-  const re = /(\d{1,2}\/\d{1,2}\/\d{4})(.*?)(-?\d+)\$/g;
+  const re = /(\d{1,2}\/\d{1,2}\/\d{4})(.*?)([+\-−–—]?\s?\d{1,3}(?:[    ]\d{3})+|[+\-−–—]?\s?\d+)\s?\$/g;
   const rows = [];
   let m;
   while((m = re.exec(blob)) !== null){
     const motif = m[2].trim();
     if(!motif) continue;
-    rows.push({date: m[1], motif, montant: parseInt(m[3], 10)});
+    const raw = m[3];
+    const neg = /[\-−–—]/.test(raw);
+    const n = parseInt(raw.replace(/\D/g,''), 10);
+    rows.push({date: m[1], motif, montant: neg ? -n : n});
   }
   return rows;
 }
