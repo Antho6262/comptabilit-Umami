@@ -1680,7 +1680,7 @@ async function doSyncToSheet(manual){
     const wk = weekInfo();
     const payload = {
       tab, template: SHEET_TEMPLATE_TAB,
-      employees: employees.map(e=>[e.nom, e.grade, e.factures, e.runs, e.ventes, e.salaire||0, e.prime||0]),
+      employees: employees.filter(e=>!/^\s*total\s*$/i.test(String(e.nom||''))).map(e=>[e.nom, e.grade, e.factures, e.runs, e.ventes, e.salaire||0, e.prime||0]),
       entries: banque.filter(b=>b.montant>0).map(b=>[b.date, b.motif, b.montant]),
       retraits: banque.filter(b=>b.montant<0 && /wwi|vcmc/i.test(b.motif)).map(b=>[b.date, b.motif, Math.abs(b.montant)]),
       depenses: banque.filter(b=>b.montant<0 && !/wwi|vcmc/i.test(b.motif) && !/^salaire\s*\/?\s*prime/i.test(b.motif.trim()) && !/^imp[oô]t/i.test(b.motif.trim())).map(b=>[b.date, b.motif, Math.abs(b.montant)]),
