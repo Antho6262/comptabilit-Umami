@@ -1920,6 +1920,7 @@ function renderArchives(){
         <div class="editable" data-archive-id="${a.id}" style="font-weight:700; font-size:15px;">${a.name}</div>
         <div style="display:flex; gap:10px; align-items:center;">
           <span class="foot-note" style="margin:0;">Archivée le ${a.createdAt}</span>
+          <button class="btn-sm btn" data-reopen-id="${a.id}">Rouvrir</button>
           <button class="btn-sm btn" data-copy-id="${a.id}">Copier employés</button>
           <button class="btn-icon" data-del-id="${a.id}" title="Supprimer">✕</button>
         </div>
@@ -1957,6 +1958,19 @@ function renderArchives(){
         if(ev.key==='Enter'){ input.blur(); }
         if(ev.key==='Escape'){ renderArchives(); }
       });
+    });
+  });
+  list.querySelectorAll('[data-reopen-id]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const arch = archives.find(x=>x.id===btn.dataset.reopenId);
+      if(!arch) return;
+      if((employees.length || banque.length) && !confirm("Rouvrir « "+arch.name+" » ? Les Statistiques et le Compte bancaire actuels seront remplacés.")) return;
+      employees = JSON.parse(JSON.stringify(arch.employees || []));
+      banque = JSON.parse(JSON.stringify(arch.banque || []));
+      if(arch.soldeManuel !== undefined) soldeManuel = arch.soldeManuel;
+      renderStats(); renderBanque(); renderDot(); renderArchives();
+      saveAll();
+      showToast("« "+arch.name+" » rouverte : Statistiques et Compte bancaire restaurés");
     });
   });
   list.querySelectorAll('[data-copy-id]').forEach(btn=>{
@@ -1999,6 +2013,7 @@ function archiveNow(name){
     employees: JSON.parse(JSON.stringify(employees)),
     entrees: banque.filter(b=>b.montant>0),
     banque: JSON.parse(JSON.stringify(banque)),
+    soldeManuel: soldeManuel,
     summary: lastDotSummary
   };
   archives.push(archive);
