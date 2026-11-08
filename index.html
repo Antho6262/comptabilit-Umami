@@ -1692,6 +1692,7 @@ async function doSyncToSheet(manual){
       if(!known){ dotSettings.siteTabs = (dotSettings.siteTabs || []).concat(tab); saveAll(); }
       showToast(r.created ? "Onglet « " + tab + " » créé depuis le modèle et rempli" : "Onglet « " + tab + " » mis à jour");
       logNow('Envoi Google Sheets', (r.created ? "Onglet créé et rempli : « " : "Onglet mis à jour : « ") + tab + " »");
+      if(manual){ archiveNow(tab); showToast("Envoyé vers « " + tab + " » et archivé — Statistiques et Compte bancaire vidés"); }
     } else {
       const msg = errText(r);
       showToast("Échec de l'envoi vers Google Sheets : " + msg);
@@ -1988,10 +1989,9 @@ document.getElementById('sheetTabInput').addEventListener('change', ()=>{
   renderDot();
 });
 
-document.getElementById('archiveDotBtn').addEventListener('click', ()=>{
-  if(!confirm("Archiver cette fiche ? Statistiques et Compte bancaire seront vidés pour repartir sur une nouvelle semaine (Gestion des employés reste intacte).")) return;
+function archiveNow(name){
   const today = new Date();
-  const defaultName = "Semaine du " + today.toLocaleDateString('fr-FR');
+  const defaultName = name || ("Semaine du " + today.toLocaleDateString('fr-FR'));
   const archive = {
     id: genId(),
     name: defaultName,
@@ -2002,7 +2002,6 @@ document.getElementById('archiveDotBtn').addEventListener('click', ()=>{
     summary: lastDotSummary
   };
   archives.push(archive);
-  // Nouvelle semaine : on vide Statistiques et Compte bancaire, Gestion des employés reste intacte
   employees = [];
   banque = [];
   soldeManuel = "0$";
@@ -2012,7 +2011,12 @@ document.getElementById('archiveDotBtn').addEventListener('click', ()=>{
   renderDot();
   renderArchives();
   saveAll();
-  showToast("Fiche archivée sous « "+defaultName+" » — clique sur le nom pour la renommer");
+  return defaultName;
+}
+document.getElementById('archiveDotBtn').addEventListener('click', ()=>{
+  if(!confirm("Archiver cette fiche ? Statistiques et Compte bancaire seront vidés pour repartir sur une nouvelle semaine (Gestion des employés reste intacte).")) return;
+  const n = archiveNow();
+  showToast("Fiche archivée sous « "+n+" » — clique sur le nom pour la renommer");
 });
 
 // ===== Connexion / comptes =====
